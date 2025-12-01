@@ -1,6 +1,6 @@
-Bayesian Marketing Mix Model (MMM)
+# Bayesian Marketing Mix Model (MMM)
 
-Project Overview
+##  Project Overview
 
 This repository contains the necessary components for building, training, and analyzing a sophisticated Bayesian Marketing Mix Model (MMM) using the PyMC framework. The model incorporates advanced features such as Adstock and Seasonality (using Fourier series) to accurately attribute revenue lift to various marketing channels.
 
@@ -50,6 +50,7 @@ The project is organized as follows:
 Saving and Loading the Model
 
 Due to the computational cost of MCMC sampling, it is best practice to save the resulting InferenceData object (the trace) once training is complete. This allows for quick loading and immediate analysis in the future.
+
 ```python
 import arviz as az
 import os
@@ -74,20 +75,24 @@ def save_model_results(trace_data, filename="mmm_inference_data.nc"):
 # loaded_trace = az.from_netcdf("mmm_inference_data.nc")
 ```
 
-📈 Key Analysis: Model Fit Visualization
+Key Analysis: Model Fit Visualization
 
 After the computationally intensive MCMC sampling is complete, it is crucial to verify how well the model's structural components (base, trend, seasonality, and marketing effects) capture the observed revenue signal.
 
 Purpose: The following code snippet generates the Model Fit Plot. It visualizes the estimated underlying revenue signal ($\mu$) and the uncertainty around the full predicted observations, allowing for a clean assessment of fit against the normalized observed revenue ($y_{obs}$).
 
-Visualization Code (02_Model_Results.ipynb - Section 3.4)
+Visualization Code 
 
-# --- 3.4. Model Fit: Observed Revenue vs. Posterior Mean ($\mu$) ---
+Model Fit: Observed Revenue vs. Posterior Mean ($\mu$) ---
 
-# Get the length of the data used for training
-N_WEEKS = len(trainer.data_df)
+Get the length of the data used for training
 
-# Generate Posterior Predictive Samples (y_obs is sampled by default)
+```python
+n_weeks = len(trainer.data_df)
+```
+
+Generate Posterior Predictive Samples (y_obs is sampled by default)
+```python
 with trainer.model:
     ppc = pm.sample_posterior_predictive(trainer.trace) 
 
@@ -121,9 +126,9 @@ ax.set_xlabel("Time (Week Index)")
 ax.set_ylabel("Revenue (Normalized)")
 ax.legend()
 plt.show()
+```
 
-
-Interpretation
+### Interpretation
 
 If the Black Line (Observed Revenue) falls within the Shaded 95% HDI, the model is correctly capturing the uncertainty and major trends.
 
