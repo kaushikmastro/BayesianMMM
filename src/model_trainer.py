@@ -32,15 +32,15 @@ class BayesianMMMTrainer:
         self.data_processed = False
         
         # Data preparation matrices (to be set in preprocess)
-        self.X_spends_norm = None
+        self.x_spends_norm = None
         self.y_revenue_norm = None
-        self.X_seasonality = None
-        self.X_trend = None
-        self.X_controls = None
+        self.x_seasonality = None
+        self.x_trend = None
+        self.x_controls = None
         
         print("Trainer initialized. Configuration loaded.")
         
-# --- DATA LOADING AND ALIGNMENT ---
+# DATA LOADING AND ALIGNMENT #
     
     def load_data(self):
         """
@@ -73,11 +73,10 @@ class BayesianMMMTrainer:
                 # Filter to the relevant country (Assuming Germany 'DE')
                 holidays_df = holidays_df[holidays_df['country'] == 'DE'].copy()
                 
-                # Prepare holiday DataFrame: rename, convert date, set index
+                # holiday DataFrame: rename, convert date, set index
                 holidays_df = holidays_df.rename(columns={'ds': date_col})
                 holidays_df[date_col] = pd.to_datetime(holidays_df[date_col])
                 
-                # CRITICAL FIX: Align holidays to the same weekly index (W-MON start)
                 holidays_df['is_holiday'] = 1
                 holidays_df = holidays_df.groupby(pd.Grouper(key=date_col, freq='W-MON', label='left')).max(numeric_only=True)
                 holidays_df = holidays_df[['is_holiday']].drop_duplicates()
@@ -91,8 +90,7 @@ class BayesianMMMTrainer:
                     how='left'
                 )
                 
-                # Fill missing (non-holiday) dates with 0
-                self.data_df['is_holiday'] = self.data_df['is_holiday'].fillna(0)
+                self.data_df['is_holiday'] = self.data_df['is_holiday'].fillna(0)  # Fill missing (non-holiday) dates with 0
                 
                 # Ensure 'is_holiday' is recognized as a control variable
                 if 'is_holiday' not in self.config.get('control_cols', []):
@@ -137,7 +135,7 @@ class BayesianMMMTrainer:
             
         return self.data_df
 
-# --- DATA PREPROCESSING AND FEATURE GENERATION ---
+#  DATA PREPROCESSING AND FEATURE GENERATION #
     
     def preprocess(self):
         """
@@ -166,25 +164,23 @@ class BayesianMMMTrainer:
 
         # Normalization (Scaling)
         
-        # --- Revenue (Dependent Variable) ---
+        # Revenue (Dependent Variable) #
         scaler_y = StandardScaler()
         self.y_revenue_norm = scaler_y.fit_transform(df[[revenue_col]].values)
         self.scalers[revenue_col] = scaler_y
         
-        # --- Spend (Independent Variables) ---
+        # Spend (Independent Variables) #
         scaler_x = StandardScaler()
         self.x_spends_norm = scaler_x.fit_transform(df[spend_cols].values) # Scale all spend columns using a single scaler to keep track of their relative standard deviations
         self.scalers['spend'] = scaler_x
 
-        # --- Control Variables ---
+        # Control Variables #
         control_cols = [col for col in self.config.get('control_cols', []) if col in df.columns]
         
         if control_cols:
-            X_controls_list = []
+            x_controls_list = []
             
-            # Scale continuous controls, keep binary/dummy controls as-is
             for col in control_cols:
-                # Check for cardinality to decide on scaling
                 if df[col].nunique() > 2: 
                     temp_scaler = StandardScaler()
                     x_scaled = temp_scaler.fit_transform(df[col].values.reshape(-1, 1))
@@ -204,7 +200,7 @@ class BayesianMMMTrainer:
         
         return self.x_spends_norm, self.y_revenue_norm, self.x_seasonality, self.x_trend, self.x_controls
 
-    # --- MODEL BUILDING ---
+    # MODEL BUILDING #
     def build_model(self):
         """
         Defines the Bayesian MMM structure using PyMC.
@@ -232,9 +228,9 @@ class BayesianMMMTrainer:
         with pm.Model(coords=coords) as self.model:
             
             # Shared Data (for MCMC and future prediction)
-            x_spends_shared = pm.MutableData("X_spends_norm", self.x_spends_norm)
-            x_seasonality_shared = pm.MutableData("X_seasonality", self.x_seasonality)
-            x_trend_shared = pm.MutableData("X_trend", self.x_trend)
+            x_spends_shared = pm.MutableData("x_spends_norm", self.x_spends_norm)
+            x_seasonality_shared = pm.MutableData("x_seasonality", self.x_seasonality)
+            x_trend_shared = pm.MutableData("x_trend", self.x_trend)
             
             # Only include control variables if they exist
             if p_controls > 0:
@@ -279,7 +275,7 @@ class BayesianMMMTrainer:
         print(f"Model built successfully with {P_channels} channels and {P_controls} control features.")
         return self.model
         
-# --- SAMPLING AND ANALYSIS ---
+#  SAMPLING AND ANALYSIS #
     
     def train(self):
         """
