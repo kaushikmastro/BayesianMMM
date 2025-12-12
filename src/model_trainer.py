@@ -82,7 +82,7 @@ class BayesianMMMTrainer:
                 holidays_df = holidays_df[['is_holiday']].drop_duplicates()
                 holidays_df.index.name = date_col
                 
-                # Merge based on the index (the date column) to avoid index loss
+                # Merging based on the index (the date column) to avoid index loss
                 self.data_df = self.data_df.merge(
                     holidays_df,
                     left_index=True, # Use index of main data
@@ -157,8 +157,8 @@ class BayesianMMMTrainer:
         # Generate sine/cosine pairs based on dayofyear
         x_seasonality_list = []
         for k in range(1, fourier_k + 1):
-            X_seasonality_list.append(np.sin(2 * k * np.pi * df.index.dayofyear / 365.25))
-            X_seasonality_list.append(np.cos(2 * k * np.pi * df.index.dayofyear / 365.25))
+            x_seasonality_list.append(np.sin(2 * k * np.pi * df.index.dayofyear / 365.25))
+            x_seasonality_list.append(np.cos(2 * k * np.pi * df.index.dayofyear / 365.25))
             
         self.x_seasonality = np.stack(x_seasonality_list, axis=1)
 
@@ -187,8 +187,7 @@ class BayesianMMMTrainer:
                     self.scalers[f'ctrl_{col}'] = temp_scaler
                     x_controls_list.append(X_scaled)
                 else: 
-                    # Binary/dummy controls (like is_holiday) are not scaled
-                    X_controls_list.append(df[col].values.reshape(-1, 1))
+                    x_controls_list.append(df[col].values.reshape(-1, 1)) # Binary/dummy controls (like is_holiday) are not scaled
 
             self.x_controls = np.hstack(X_controls_list)
         else:
