@@ -1,62 +1,84 @@
 import pandas as pd
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pymc as pm
 from sklearn.preprocessing import StandardScaler
 import arviz as az
 import pytensor.tensor as pt
-import logging
-import os
+import mlflow
+from pathlib import Path
 
 from .adstock_functions import vectorized_geometric_adstock
+from .utils import setup_logger, validate_config
 
-
-logging.basicConfig(level=logging.INFO)
+logger = setup_logger(__name__)
 
 class BayesianMMMTrainer:
     """
-    The core tool for running a Bayesian Marketing Mix Model (MMM).
-    Handles data loading, preprocessing, model building, MCMC sampling, and analysis.
+    Production-grade Bayesian Marketing Mix Model (MMM) trainer.
+
+    Orchestrates the complete pipeline: data loading → preprocessing → feature engineering
+    (adstock transformations) → Bayesian model training → ROI quantification.
+
+    Leverages PyMC for robust posterior inference and MLflow for reproducible experiment tracking.
+
+    Attributes:
+        config: Configuration dictionary with spend_cols, revenue_col, fourier_k, mcmc_params
+        data_path: Path to input CSV data
+        holidays_path: Optional path to holidays data for control variables
     """
     def __init__(self, config: Dict, data_path: str, holidays_path: Optional[str] = None):
+        """Initialize trainer with configuration and data paths.
+
+        Args:
+            config: Configuration dict with required keys: date_col, spend_cols, revenue_col,
+                   fourier_k, mcmc_params
+            data_path: Path to CSV data file
+            holidays_path: Optional path to holidays CSV for control variable creation
+
+        Raises:
+            ValueError: If configuration is invalid
         """
-        Initializes the trainer with file paths and configuration.
-        """
+        validate_config(config)
+
         self.config = config
         self.data_path = data_path
         self.holidays_path = holidays_path
-        self.data_df = None       # Stores the merged and preprocessed DataFrame
-        self.scalers = {}         # Stores scalers (StandardScaler objects) for unscaling ROI
-        self.trace = None         # Stores the MCMC posterior trace (az.InferenceData)
-        self.model = None         # Stores the PyMC model object
+        self.data_df = None
+        self.scalers = {}
+        self.trace = None
+        self.model = None
         self.data_processed = False
-        
-        # Data preparation matrices (to be set in preprocess)
+
         self.x_spends_norm = None
         self.y_revenue_norm = None
         self.x_seasonality = None
         self.x_trend = None
         self.x_controls = None
-        
-        print("Trainer initialized. Configuration loaded.")
+
+        logger.info("BayesianMMMTrainer initialized with validated configuration")
         
 # DATA LOADING AND ALIGNMENT #
     
-    def load_data(self):
-        """
-        Loads the main data, converts the date index, and merges holiday data.
-        Handles time alignment and simple imputation.
+    def load_data(self) -> pd.DataFrame:
+        """Load and preprocess data: date conversion, grouping, and holiday merging.
+
+        Returns:
+            DataFrame with weekly-aggregated data, holidays merged if available
+
+        Raises:
+            FileNotFoundError: If data_path doesn't exist
+            ValueError: If DataFrame is empty after preprocessing
         """
         date_col = self.config['date_col']
         spend_cols = self.config['spend_cols']
         revenue_col = self.config['revenue_col']
-        
-        # Load Main Data
+
         try:
             self.data_df = pd.read_csv(self.data_path)
-            print(f"Loaded main data from: {self.data_path}")
+            logger.info(f"Loaded data from {self.data_path} ({len(self.data_df)} rows)")
         except FileNotFoundError:
-            raise FileNotFoundError(f"Main data file not found at {self.data_path}")
+            raise FileNotFoundError(f"Data file not found: {self.data_path}")
 
         # Convert Date Column and Set Index
         self.data_df[date_col] = pd.to_datetime(self.data_df[date_col])
@@ -99,12 +121,12 @@ class BayesianMMMTrainer:
                          self.config['control_cols'] = []
                     self.config['control_cols'].append('is_holiday')
                 
-                print(f"Merged and filtered holiday data successfully.")
-            
+                logger.info("Holiday data merged successfully")
+
             except FileNotFoundError:
-                print(f"Warning: Holiday file not found at {self.holidays_path}. Skipping merge.")
+                logger.warning(f"Holiday file not found at {self.holidays_path}")
             except Exception as e:
-                print(f"Warning: Error processing holiday data: {e}. Skipping merge.")
+                logger.warning(f"Error processing holiday data: {e}")
 
         # Handle time alignment and fill missing values
         full_index = pd.date_range(start=self.data_df.index.min(), 
@@ -127,19 +149,19 @@ class BayesianMMMTrainer:
             
         self.data_df.dropna(subset=[revenue_col], inplace=True)
 
-        print(f"Data loading and initial alignment complete. Total weeks: {len(self.data_df)}")
-        
-        # Check if data is empty after cleanup, which would cause the StandardScaler error
         if self.data_df.empty:
-            raise ValueError("Data frame is empty after alignment and imputation. Check your simulated data and date ranges.")
-            
+            raise ValueError("DataFrame empty after preprocessing. Check data and date ranges")
+
+        logger.info(f"Data loading complete: {len(self.data_df)} weeks")
         return self.data_df
 
 #  DATA PREPROCESSING AND FEATURE GENERATION #
     
-    def preprocess(self):
-        """
-        Generates Trend, Fourier Seasonality, and scales all necessary variables.
+    def preprocess(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Generate features: trend, Fourier seasonality. Normalize revenue and spend.
+
+        Returns:
+            Tuple of (x_spends_norm, y_revenue_norm, x_seasonality, x_trend, x_controls)
         """
         if self.data_df is None:
             self.load_data()
@@ -176,33 +198,40 @@ class BayesianMMMTrainer:
 
         # Control Variables #
         control_cols = [col for col in self.config.get('control_cols', []) if col in df.columns]
-        
+
         if control_cols:
             x_controls_list = []
-            
+
             for col in control_cols:
-                if df[col].nunique() > 2: 
+                if df[col].nunique() > 2:
                     temp_scaler = StandardScaler()
                     x_scaled = temp_scaler.fit_transform(df[col].values.reshape(-1, 1))
                     self.scalers[f'ctrl_{col}'] = temp_scaler
-                    x_controls_list.append(X_scaled)
-                else: 
+                    x_controls_list.append(x_scaled)
+                else:
                     x_controls_list.append(df[col].values.reshape(-1, 1)) # Binary/dummy controls (like is_holiday) are not scaled
 
-            self.x_controls = np.hstack(X_controls_list)
+            self.x_controls = np.hstack(x_controls_list)
         else:
-            
-             self.x_controls = np.array([[]]).reshape(len(df), 0) 
+
+            self.x_controls = np.array([[]]).reshape(len(df), 0) 
 
         self.data_processed = True
-        print("Data preprocessing complete: Trend, Seasonality, and Scaling applied.")
-        
+        logger.info(f"Preprocessing complete: {p_fourier} Fourier terms, {p_controls} controls")
+
         return self.x_spends_norm, self.y_revenue_norm, self.x_seasonality, self.x_trend, self.x_controls
 
-    # MODEL BUILDING #
-    def build_model(self):
-        """
-        Defines the Bayesian MMM structure using PyMC.
+    def build_model(self) -> pm.Model:
+        """Build Bayesian MMM: adstock + trend + seasonality + control effects.
+
+        Specifies PyMC probabilistic graphical model with:
+        - Alpha (decay): Beta priors for adstock decay rates
+        - Beta (effectiveness): HalfNormal priors for channel ROI
+        - Trend & seasonality: Fourier decomposition for non-marketing effects
+        - Controls: Scaling for confounding variables (holidays, etc)
+
+        Returns:
+            Compiled PyMC model ready for MCMC sampling
         """
         if not self.data_processed:
             self.preprocess()
@@ -236,29 +265,22 @@ class BayesianMMMTrainer:
                 x_controls_shared = pm.MutableData("x_controls", self.x_controls)
 
             # Priors
-            alpha = pm.Beta("alpha", 2, 8, dims="channel")# Alpha: Adstock decay rate (Beta distribution often used for [0, 1] range)        
-           
-            beta = pm.HalfNormal("beta", sigma=1, dims="channel")  # Beta: Channel effectiveness (HalfNormal for positive effectiveness)   
-            
-            intercept = pm.Normal("intercept", mu=0, sigma=10)      
-            
+            alpha = pm.Beta("alpha", 2, 8, dims="channel")
+            beta = pm.HalfNormal("beta", sigma=1, dims="channel")
+            intercept = pm.Normal("intercept", mu=0, sigma=10)
             trend_coef = pm.Normal("trend_coef", mu=0, sigma=1)
-            
             seasonality_weights = pm.Normal("seasonality_weights", mu=0, sigma=1, dims="fourier_comp")
-            
+
             # Control Priors and Effect Calculation
             if p_controls > 0:
                 control_coefs = pm.Normal("control_coefs", mu=0, sigma=1, dims="control_comp")
-                control_effect = pm.math.dot(X_controls_shared, control_coefs)
-                print(f"DEBUG: Control effect is a PyTensor variable (P_controls={P_controls})")
+                control_effect = pm.math.dot(x_controls_shared, control_coefs)
             else:
-        
-                control_effect = pt.constant(0.0) 
-                print(f"DEBUG: Control effect is a PyTensor constant 0.0 (P_controls={P_controls})")
+                control_effect = pt.constant(0.0)
 
             # Error term prior
             sigma = pm.HalfCauchy("sigma", beta=1)
-            X_adstock = vectorized_geometric_adstock(x_spends_shared, alpha) 
+            x_adstock = vectorized_geometric_adstock(x_spends_shared, alpha)
             media_effect = pm.math.dot(x_adstock, beta)
             
             # Baseline Components
@@ -271,89 +293,136 @@ class BayesianMMMTrainer:
             # Observed Normalized Revenue (The Likelihood Function)
             pm.Normal("y_obs", mu=mu, sigma=sigma, observed=self.y_revenue_norm[:, 0], dims="obs_id") 
 
-        print(f"Model built successfully with {P_channels} channels and {P_controls} control features.")
+        logger.info(f"Model built: {p_channels} channels, {p_fourier} Fourier terms, {p_controls} controls")
         return self.model
         
 #  SAMPLING AND ANALYSIS #
     
-    def train(self):
-        """
-        Samples the posterior distribution using NUTS.
+    def train(self, experiment_name: str = "mmm_baseline") -> az.InferenceData:
+        """Execute MCMC sampling to estimate posterior distribution.
+
+        Uses NUTS sampler for efficient exploration of parameter space. Validates
+        convergence via R-hat diagnostics (target: <1.05).
+
+        Args:
+            experiment_name: MLflow experiment name for tracking
+
+        Returns:
+            ArviZ InferenceData object with posterior samples and diagnostics
+
+        Raises:
+            RuntimeError: If MCMC sampling fails
         """
         if self.model is None:
             self.build_model()
-            
+
         mcmc_params = self.config['mcmc_params']
-        
-        print(f"Starting MCMC sampling: Draws={mcmc_params['draws']}, Tune={mcmc_params['tune']}")
-        
-        with self.model:
-            self.trace = pm.sample(
-                draws=mcmc_params['draws'], 
-                tune=mcmc_params['tune'], 
-                target_accept=mcmc_params['target_accept'], 
-                return_inferencedata=True
-            )
-        
-        # Basic Convergence Check
-        summary = az.summary(self.trace, var_names=["beta", "alpha", "sigma"])
-        if (summary['r_hat'] > 1.05).any():
-            print("\nWARNING: Some R-hat values are high (>1.05). Check convergence.")
-        
-        print("\nSampling complete. Posterior Summary (Partial):")
-        print(summary)
+
+        mlflow.set_experiment(experiment_name)
+        with mlflow.start_run():
+            logger.info(f"Starting MCMC: draws={mcmc_params['draws']}, tune={mcmc_params['tune']}")
+
+            with self.model:
+                self.trace = pm.sample(
+                    draws=mcmc_params['draws'],
+                    tune=mcmc_params['tune'],
+                    target_accept=mcmc_params['target_accept'],
+                    return_inferencedata=True,
+                    progressbar=True
+                )
+
+            summary = az.summary(self.trace, var_names=["beta", "alpha", "sigma"])
+
+            if (summary['r_hat'] > 1.05).any():
+                logger.warning("High R-hat values detected (>1.05). Check convergence.")
+            else:
+                logger.info("All R-hat values < 1.05. Model converged successfully.")
+
+            # Log metrics to MLflow
+            mlflow.log_param("n_draws", mcmc_params['draws'])
+            mlflow.log_param("n_tune", mcmc_params['tune'])
+            mlflow.log_param("target_accept", mcmc_params['target_accept'])
+            mlflow.log_metric("mean_r_hat", summary['r_hat'].mean())
+
+            logger.info("Sampling complete")
+
         return self.trace
 
-    def calculate_roi(self):
-        """
-        Calculates the unscaled ROI for each channel using posterior means and scalers.
+    def calculate_roi(self) -> Dict[str, Dict[str, float]]:
+        """Calculate unscaled ROI per channel from posterior estimates.
+
+        ROI = beta * (1 / (1 - alpha)) * (sigma_y / sigma_x)
+
+        Where:
+        - beta: posterior mean channel effectiveness
+        - alpha: posterior mean adstock decay rate
+        - sigma_y, sigma_x: standard deviations from training normalization
+
+        Returns:
+            Dict mapping channel names to {mean_beta, mean_alpha, unscaled_roi}
+
+        Raises:
+            ValueError: If model has not been trained
         """
         if self.trace is None:
-            raise ValueError("Model must be trained before calculating ROI.")
-            
-        # Extract Posterior Means
-        beta_post = self.trace.posterior["beta"].mean(dim=["chain","draw"]).values
-        alpha_post = self.trace.posterior["alpha"].mean(dim=["chain","draw"]).values
-        
-        # Extract Unscaling Factors
+            raise ValueError("Train model before calculating ROI")
+
+        beta_post = self.trace.posterior["beta"].mean(dim=["chain", "draw"]).values
+        alpha_post = self.trace.posterior["alpha"].mean(dim=["chain", "draw"]).values
+
         revenue_col = self.config['revenue_col']
-        revenue_std = self.scalers[revenue_col].scale_[0] 
-        # Assume 'spend' scaler for all spend columns
-        spend_std = self.scalers['spend'].scale_ 
-        
+        revenue_std = self.scalers[revenue_col].scale_[0]
+        spend_std = self.scalers['spend'].scale_
+
         roi_results = {}
-        
-        # Calculate ROI for Each Channel
+
         for i, channel in enumerate(self.config['spend_cols']):
             alpha = alpha_post[i]
             beta = beta_post[i]
             sigma_x_i = spend_std[i]
-            
-            lifetime_multiplier = 1 / (1 - alpha)  # ROI Formula: (beta * Lifetime Multiplier) * Unscaling Factor
-            
-            unscaling_factor = revenue_std / sigma_x_i # Unscaling Factor: sigma_y / sigma_x_i
-            
+
+            lifetime_multiplier = 1 / (1 - alpha)
+            unscaling_factor = revenue_std / sigma_x_i
             roi = beta * lifetime_multiplier * unscaling_factor
-            
+
             roi_results[channel] = {
-                "mean_beta": beta,
-                "mean_alpha": alpha,
-                "unscaled_roi": roi
+                "mean_beta": float(beta),
+                "mean_alpha": float(alpha),
+                "unscaled_roi": float(roi)
             }
-            
-            print(f"ROI for {channel}: {roi:.2f}")
+
+            logger.info(f"{channel:20s} | ROI: {roi:8.2f} | Beta: {beta:6.3f} | Alpha: {alpha:6.3f}")
 
         return roi_results
 
         
-    def run_full_analysis(self):
-        """Convenience method to run the entire pipeline."""
-        print("--- STARTING FULL MMM PIPELINE ---")
+    def save_trace(self, filepath: str) -> None:
+        """Persist MCMC trace to NetCDF for later analysis."""
+        if self.trace is None:
+            raise ValueError("No trace to save. Train model first.")
+        az.to_netcdf(self.trace, filepath)
+        logger.info(f"Trace saved to {filepath}")
+
+    def load_trace(self, filepath: str) -> az.InferenceData:
+        """Load previously saved MCMC trace."""
+        self.trace = az.from_netcdf(filepath)
+        logger.info(f"Trace loaded from {filepath}")
+        return self.trace
+
+    def run_full_analysis(self, experiment_name: str = "mmm_baseline") -> Dict[str, Dict[str, float]]:
+        """Execute complete MMM pipeline: data → model → inference → ROI.
+
+        Args:
+            experiment_name: MLflow experiment name
+
+        Returns:
+            Dictionary of channel ROI results
+        """
+        logger.info("=== Starting Full MMM Pipeline ===")
         self.load_data()
         self.preprocess()
         self.build_model()
-        self.train()
+        self.train(experiment_name=experiment_name)
         roi = self.calculate_roi()
-        self.plot_ppc()
-        print("--- PIPELINE COMPLETE ---")
+        logger.info("=== Pipeline Complete ===")
         return roi
