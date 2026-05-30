@@ -1,36 +1,15 @@
-=========================================================================
-
-Bayesian Marketing Mix Model (MMM) Dependencies
-
-This file lists the pinned Python packages required to run the MMM
-training and analysis notebooks successfully.
-
-=========================================================================
-
---- Core Data Handling and Modeling ---
-
-PyMC: The primary library for Bayesian modeling and MCMC sampling.
-
+# Core Scientific & Bayesian Computing
 pymc==5.15.1
-
-ArviZ: Used for Bayesian model visualization, diagnostic checks, and InferenceData storage.
-
 arviz==0.17.1
-
-PyTensor: The backend library for PyMC, handling tensor computations and automatic differentiation.
-
 pytensor==2.20.1
 
---- Data Manipulation and Visualization ---
-
-Pandas: Essential for data loading, manipulation, and preprocessing (DataFrame objects).
-
+# Data Handling & Numerical Computing
 pandas==2.1.4
-
-NumPy: Foundation for numerical computing, used heavily by Pandas and PyMC.
-
 numpy==1.26.4
+scikit-learn>=1.3.0
 
-Matplotlib: Core library for generating static, interactive, and animated visualizations (plots).
-
+# Visualization
 matplotlib==3.8.2
+
+# Experiment Tracking & Reproducibility
+mlflow>=2.0.0
