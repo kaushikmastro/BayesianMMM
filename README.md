@@ -313,41 +313,7 @@ trainer.load_trace('models/mmm_trace.nc')
 roi_results = trainer.calculate_roi()
 ```
 
-## 🎓 Educational Context
 
-This framework demonstrates:
-
-- **Bayesian inference**: Probabilistic modeling with PyMC, posterior sampling
-- **Causal inference**: Adstock decay as a mechanism for lagged effects
-- **Time series decomposition**: Trend + seasonality via Fourier basis
-- **MCMC diagnostics**: Convergence monitoring (R̂, ESS)
-- **MLflow integration**: Reproducible experiment tracking
-- **Production ML**: Config validation, logging, testing, CI/CD
-
-## 🤝 Contributing
-
-Contributions welcome! Areas for enhancement:
-
-- [ ] Saturation curves (diminishing returns by spend level)
-- [ ] Multi-country holiday handling
-- [ ] Hierarchical modeling across regions/brands
-- [ ] GradientBoosting baseline for comparison
-- [ ] Interactive Dash dashboard
-
-## 📚 References
-
-- [PyMC Documentation](https://docs.pymc.io/)
-- [ArviZ for Bayesian Diagnostics](https://arviz-devs.github.io/)
-- [Marketing Mix Modeling Overview](https://en.wikipedia.org/wiki/Marketing_mix_modeling)
-- [Adstock Decay Models](https://en.wikipedia.org/wiki/Advertising_elasticity_of_demand)
-
-## 📝 License
-
-MIT License — see [LICENSE](LICENSE) file
-
-## 👤 Author
-
-**Kaushik Mukherjee** — [GitHub](https://github.com/kaushikmastro)
 
 ---
 
