@@ -173,7 +173,7 @@ class BayesianMMMTrainer:
         
         # Feature Generation: Trend
         df['trend'] = np.arange(len(df)) + 1
-        self.X_trend = df['trend'].values.reshape(-1, 1)
+        self.x_trend = df['trend'].values.reshape(-1, 1)
 
         # Feature Generation: Fourier Seasonality
         # Generate sine/cosine pairs based on dayofyear
@@ -214,7 +214,10 @@ class BayesianMMMTrainer:
             self.x_controls = np.hstack(x_controls_list)
         else:
 
-            self.x_controls = np.array([[]]).reshape(len(df), 0) 
+            self.x_controls = np.array([[]]).reshape(len(df), 0)
+
+        p_fourier = self.x_seasonality.shape[1]
+        p_controls = self.x_controls.shape[1]
 
         self.data_processed = True
         logger.info(f"Preprocessing complete: {p_fourier} Fourier terms, {p_controls} controls")

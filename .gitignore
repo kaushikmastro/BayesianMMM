@@ -23,6 +23,11 @@ wheels/
 .installed.cfg
 *.egg
 
+# Testing & Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb_checkpoints

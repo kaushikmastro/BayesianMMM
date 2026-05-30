@@ -29,10 +29,7 @@ def vectorized_geometric_adstock(x: 'TensorVariable', alpha: 'TensorVariable') -
 
     # Set elements where the lag is negative (i < j) to zero (no future spend affects past adstock)
     DecayMatrix = pt.where(TimeMatrix.dimshuffle(0, 1, 'x') >= 0, alpha_power_matrix, 0)
-    
-    #  Perform Batched Multiplication/Convolution
-    Adstock_t,k = sum_j (DecayMatrix_t,j,k * X_j,k)
-    
+
     # Reshape X for broadcasting across the middle axis of DecayMatrix
     X_reshaped = x.dimshuffle(0, 'x', 1) 
     
