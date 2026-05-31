@@ -8,6 +8,8 @@
 
 A **production-grade Bayesian Marketing Mix Model** framework for quantifying ROI across marketing channels. Built with PyMC for robust posterior inference and MLflow for reproducible experiment tracking.
 
+> **Note on Notebook Rendering**: GitHub's notebook renderer may occasionally show an error. This is a [known GitHub infrastructure issue](NOTEBOOK_FIX_GUIDE.md) affecting many repositories. The notebook works perfectly in local Jupyter, VS Code, Google Colab, and with nbconvert. For a quick demo, run `examples/quickstart.py` instead.
+
 ## 🎯 Overview
 
 This framework enables data scientists to:
